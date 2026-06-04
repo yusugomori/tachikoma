@@ -1,0 +1,10 @@
+pre-commit:
+  commands:
+    biome:
+      run: pnpm lint
+
+pre-push:
+  commands:
+    security-scan:
+      glob: "pnpm-lock.yaml"
+      run: bash scripts/security-scan.sh

@@ -1,0 +1,5 @@
+# Tachikoma project identity. Commit-safe; machine-local state lives in .tachikoma/state.
+schema_version = 1
+project_id = "proj_tachikoma"
+name = "tachikoma"
+created_at = "2026-06-03T00:34:44.733Z"

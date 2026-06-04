@@ -1,0 +1,73 @@
+{
+  "name": "@yusugomori/tachikoma",
+  "version": "0.1.0",
+  "description": "Local project-state runtime for coding agents.",
+  "license": "MIT",
+  "author": "Yusuke Sugomori <me@yusugomori.com>",
+  "homepage": "https://github.com/yusugomori/tachikoma#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yusugomori/tachikoma.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yusugomori/tachikoma/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "claude-code",
+    "codex",
+    "mcp",
+    "multi-agent",
+    "agent-coordination",
+    "event-sourcing",
+    "cli"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.0.8",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "install.sh"
+  ],
+  "bin": {
+    "tachikoma": "dist/src/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/store/migrations', 'dist/src/store/migrations', { recursive: true })\"",
+    "dev": "tsx src/cli/index.ts",
+    "tachikoma": "tsx src/cli/index.ts",
+    "prepare": "if [ -d .git ] && command -v lefthook >/dev/null 2>&1; then lefthook install; fi",
+    "prepack": "pnpm build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "security": "bash scripts/security-scan.sh",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.10.0",
+    "commander": "^15.0.0",
+    "toml": "^4.1.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.9.1",
+    "lefthook": "^2.1.9",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

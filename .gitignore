@@ -1,0 +1,38 @@
+# OS files
+.DS_Store
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+coverage/
+
+# Local files
+.local/
+.env
+.env.*
+*.log
+pnpm-debug.log*
+tmp/
+.cache/
+
+# tachikoma:ignore:start
+# Tachikoma local runtime and generated integration
+.tachikoma/state/
+.tachikoma/reports/
+.mcp.json
+.codex/hooks.json
+.claude/settings.local.json
+.claude/skills/tachikoma/
+.claude/skills/tachikoma-boot/
+.claude/skills/tachikoma-sync/
+.claude/skills/tachikoma-relay/
+.claude/skills/tachikoma-dismiss/
+.codex/skills/tachikoma/
+.codex/skills/tachikoma-boot/
+.codex/skills/tachikoma-sync/
+.codex/skills/tachikoma-relay/
+.codex/skills/tachikoma-dismiss/
+# tachikoma:ignore:end
