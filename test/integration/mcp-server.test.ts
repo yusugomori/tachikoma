@@ -80,13 +80,14 @@ describe("MCP server", () => {
       });
       expect(session.claimedCount).toBe(1);
 
-      await harness.call("tachikoma_reply", {
+      const reply = await harness.call("tachikoma_reply", {
         actorName: "musashi",
         actorRuntime: "claude",
         actorRole: "implementer",
         conversationId,
         message: "MCP reply from implementer"
       });
+      expect(reply.recipients).toEqual([{ kind: "agent", name: "loki" }]);
 
       const thread = await harness.call("tachikoma_thread_show", {
         conversationId

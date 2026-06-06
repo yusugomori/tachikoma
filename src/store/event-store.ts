@@ -13,6 +13,10 @@ interface EventRow {
   created_at: string;
 }
 
+interface CountRow {
+  count: number;
+}
+
 export interface EventStoreListOptions {
   afterId?: string;
   limit?: number;
@@ -76,7 +80,7 @@ export class EventStore {
         ORDER BY sequence ASC
         LIMIT ?
       `)
-      .all(projectId, afterSequence, options.limit ?? 1_000)
+      .all(projectId, afterSequence, options.limit ?? -1)
       .map(mapEventRow);
 
     if (!options.types) {
@@ -84,6 +88,14 @@ export class EventStore {
     }
 
     return rows.filter((event) => options.types?.includes(event.type));
+  }
+
+  public count(projectId: string): number {
+    return (
+      this.db
+        .prepare<[string], CountRow>("SELECT count(*) AS count FROM events WHERE project_id = ?")
+        .get(projectId)?.count ?? 0
+    );
   }
 
   private sequenceForEvent(eventId: string): number {

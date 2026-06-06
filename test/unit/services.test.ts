@@ -356,6 +356,81 @@ describe("command services", () => {
     }
   });
 
+  it("replyToThread routes across the 1000-event projection boundary", () => {
+    const fixture = openFixture();
+    const rootServices = createServices(fixture.context);
+
+    try {
+      registerCodexReviewer(rootServices);
+      registerClaudeImpl(rootServices);
+
+      for (let index = 0; index < 997; index += 1) {
+        fixture.context.appendEvent({
+          id: `evt_filler_${index}`,
+          type: "message.sent",
+          target: {
+            conversationId: "conv_filler",
+            messageId: `msg_filler_${index}`
+          },
+          payload: {
+            sender: {
+              kind: "agent",
+              name: "loki"
+            },
+            recipients: [
+              {
+                kind: "agent",
+                name: "musashi"
+              }
+            ],
+            body: `filler ${index}`,
+            replyPolicy: "none",
+            linkedRecords: []
+          },
+          createdAt: "2026-06-01T00:10:00.000Z"
+        });
+      }
+
+      expect(fixture.eventStore.count("proj_test")).toBe(999);
+
+      const askEvents = createServices(codexContext(fixture)).conversations.ask({
+        target: "musashi",
+        body: "boundary ask"
+      });
+      const conversationId = askEvents.find((event) => event.type === "conversation.opened")?.target
+        .conversationId;
+
+      if (!conversationId) {
+        throw new Error("Expected ask to open a conversation.");
+      }
+
+      const replyEvents = createServices(claudeContext(fixture)).conversations.replyToThread({
+        conversationId,
+        body: "boundary reply"
+      });
+
+      const projections = fixture.context.projections();
+
+      expect(replyEvents.some((event) => event.type === "conversation.message_routed")).toBe(true);
+      expect(
+        messagesForThread(projections.conversations, conversationId).map((message) => message.body)
+      ).toEqual(["boundary ask", "boundary reply"]);
+      expect(getInboxForAgentName(projections.inbox, projections.agents, "loki")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: "boundary reply",
+            target: {
+              kind: "agent",
+              name: "loki"
+            }
+          })
+        ])
+      );
+    } finally {
+      fixture.store.close();
+    }
+  });
+
   it("replyToThread records an unrouted reply when the original sender is system", () => {
     const fixture = openFixture();
     const rootServices = createServices(fixture.context);

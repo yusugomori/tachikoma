@@ -278,6 +278,16 @@ function inferReplyRecipients(
   sender: ConversationParticipant
 ): RoutingTarget[] {
   const recipients = new Map<string, RoutingTarget>();
+  const thread = conversations.threads.find((candidate) => candidate.id === conversationId);
+
+  for (const participant of thread?.participants ?? []) {
+    if (!sameParticipant(participant, sender)) {
+      const target = participantToRoutingTarget(participant);
+      if (target) {
+        recipients.set(routingTargetKey(target), target);
+      }
+    }
+  }
 
   for (const message of messagesForThread(conversations, conversationId)) {
     if (!sameParticipant(message.sender, sender)) {

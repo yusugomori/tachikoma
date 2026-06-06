@@ -4,8 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { sqliteFileDiagnostics, sqliteWalWarning } from "../../src/cli/commands/doctor.js";
 import { main } from "../../src/cli/index.js";
 import type { CliIo } from "../../src/cli/io.js";
+import { createEvent } from "../../src/domain/events.js";
+import { EventStore } from "../../src/store/event-store.js";
+import { SqliteStore } from "../../src/store/sqlite-store.js";
 
 const TACHIKOMA_IDENTITY_ENV_KEYS = [
   "TACHIKOMA_AGENT_NAME",
@@ -206,6 +210,90 @@ describe("CLI commands", () => {
     expect(existsSync(cli.storePath)).toBe(true);
     expect(existsSync(join(cli.root, ".tachikoma", "project.toml"))).toBe(true);
     expect(existsSync(join(cli.root, ".tachikoma", "state", "tachikoma.sqlite"))).toBe(false);
+  });
+
+  it("doctor reports real event counts beyond 1000 and observes SQLite files", async () => {
+    const cli = createCliHarness(roots);
+
+    await cli.run("init");
+
+    const store = SqliteStore.open(cli.storePath);
+
+    try {
+      const eventStore = new EventStore(store.db);
+      const events = Array.from({ length: 1005 }, (_, index) =>
+        createEvent(
+          {
+            id: `evt_doctor_${index}`,
+            projectId: "cli-test",
+            type: "message.sent",
+            target: {
+              conversationId: "conv_doctor",
+              messageId: `msg_doctor_${index}`
+            },
+            payload: {
+              sender: {
+                kind: "system"
+              },
+              recipients: [
+                {
+                  kind: "agent",
+                  name: "loki"
+                }
+              ],
+              body: `doctor count ${index}`,
+              replyPolicy: "none",
+              linkedRecords: []
+            }
+          },
+          "2026-06-01T00:00:00.000Z"
+        )
+      );
+
+      eventStore.appendBatch(events);
+    } finally {
+      store.close();
+    }
+
+    const before = sqliteFileDiagnostics(cli.storePath);
+    const doctor = await cli.run("doctor");
+    const after = sqliteFileDiagnostics(cli.storePath);
+
+    expect(doctor).toContain("events: 1006");
+    expect(doctor).toContain("sqlite journal_mode:");
+    expect(doctor).toContain("sqlite main:");
+    expect(doctor).toContain("sqlite wal:");
+    expect(doctor).toContain("sqlite shm:");
+    expect(after).toEqual(before);
+  });
+
+  it("reports SQLite sibling diagnostics for present and missing files", () => {
+    const root = mkdtempSync(join(tmpdir(), "tachikoma-cli-sqlite-files-"));
+    roots.push(root);
+    const storePath = join(root, "tachikoma.sqlite");
+
+    writeFileSync(storePath, "main");
+    writeFileSync(`${storePath}-wal`, "wal is intentionally larger than main");
+
+    const diagnostics = sqliteFileDiagnostics(storePath);
+
+    expect(diagnostics).toEqual([
+      {
+        label: "main",
+        path: storePath,
+        bytes: 4
+      },
+      {
+        label: "wal",
+        path: `${storePath}-wal`,
+        bytes: 37
+      },
+      {
+        label: "shm",
+        path: `${storePath}-shm`
+      }
+    ]);
+    expect(sqliteWalWarning(diagnostics)).toContain("sqlite wal warning:");
   });
 
   it("lets a running agent name itself with join", async () => {
