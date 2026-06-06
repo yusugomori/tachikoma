@@ -44,7 +44,7 @@ Tachikoma には、local CLI、SQLite-backed event store、projection、MCP serv
 
 ## 前提条件
 
-- Node.js 22 以降。
+- Node.js 24 以降。
 - source checkout は pnpm、global install script は npm を使用。
 - live な agent session 用に Codex CLI または Claude Code。
 
