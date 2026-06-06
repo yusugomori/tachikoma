@@ -368,7 +368,7 @@ export class WebSocketCodexAppServerTransport implements CodexJsonRpcTransport {
 
     if (!WebSocketRuntime) {
       throw new CodexAppServerUnavailableError(
-        "Node.js WebSocket runtime is unavailable. Tachikoma Codex runtime requires Node 22+."
+        "Node.js WebSocket runtime is unavailable. Tachikoma Codex runtime requires Node 24+."
       );
     }
 

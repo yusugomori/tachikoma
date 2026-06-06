@@ -75,7 +75,7 @@ sessions should trust.
 
 ## Prerequisites
 
-- Node.js 22 or newer.
+- Node.js 24 or newer.
 - pnpm for a source checkout, or npm for the global install script.
 - Codex CLI and/or Claude Code for live agent sessions.
 

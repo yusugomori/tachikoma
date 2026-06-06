@@ -52,7 +52,7 @@ describe("package smoke", () => {
     expect(packageJson.name).toBe("@yusugomori/tachikoma");
     expect(packageJson.private).toBeUndefined();
     expect(packageJson.bin?.tachikoma).toBe("dist/src/cli/index.js");
-    expect(packageJson.engines?.node).toBe(">=22");
+    expect(packageJson.engines?.node).toBe(">=24");
     expect(packageJson.files).toContain("install.sh");
     // npm pack triggers prepack -> full tsc build, which is slow on cold CI runners.
   }, 120000);
