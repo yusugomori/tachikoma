@@ -82,6 +82,53 @@ describe("SQLite event store", () => {
     }
   });
 
+  it("lists all project events by default while preserving explicit limits", () => {
+    const store = openTempStore();
+    const eventStore = new EventStore(store.db);
+
+    try {
+      const events = Array.from({ length: 1005 }, (_, index) =>
+        createEvent(
+          {
+            id: `evt_many_${index}`,
+            projectId: "proj_events",
+            type: "message.sent",
+            target: {
+              conversationId: "conv_many",
+              messageId: `msg_many_${index}`
+            },
+            payload: {
+              sender: {
+                kind: "system"
+              },
+              recipients: [
+                {
+                  kind: "agent",
+                  name: "loki"
+                }
+              ],
+              body: `hello ${index}`,
+              replyPolicy: "required"
+            }
+          },
+          "2026-06-01T00:00:00.000Z"
+        )
+      );
+
+      eventStore.appendBatch(events);
+
+      const allEvents = eventStore.listForward("proj_events");
+      const limitedEvents = eventStore.listForward("proj_events", { limit: 1000 });
+
+      expect(allEvents).toHaveLength(1005);
+      expect(allEvents.at(-1)?.id).toBe("evt_many_1004");
+      expect(limitedEvents).toHaveLength(1000);
+      expect(limitedEvents.at(-1)?.id).toBe("evt_many_999");
+    } finally {
+      store.close();
+    }
+  });
+
   it("does not expose SQLite row ids as event ids", () => {
     const store = openTempStore();
     const eventStore = new EventStore(store.db);

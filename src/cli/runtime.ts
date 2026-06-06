@@ -26,6 +26,7 @@ export interface CliRuntimeOptions {
   projectName?: string;
   dataRoot?: string;
   actor?: EventActor;
+  readonly?: boolean;
 }
 
 export interface CliRuntime {
@@ -62,7 +63,10 @@ export function openCliRuntime(options: CliRuntimeOptions = {}): CliRuntime {
   const { cwd, storePath } = resolution;
   mkdirSync(dirname(storePath), { recursive: true });
 
-  const store = SqliteStore.open(storePath);
+  const store = SqliteStore.open(storePath, {
+    readonly: options.readonly,
+    migrate: options.readonly ? false : undefined
+  });
   const eventStore = new EventStore(store.db);
   const context = new ServiceContext({
     project: {

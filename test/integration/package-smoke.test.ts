@@ -63,7 +63,7 @@ describe("package smoke", () => {
     execFileSync("pnpm", ["build"], { stdio: "pipe" });
 
     expect(execFileSync("node", ["dist/src/cli/index.js", "--version"], { encoding: "utf8" })).toBe(
-      "0.1.0\n"
+      "0.2.0\n"
     );
     expect(
       execFileSync("node", ["dist/src/cli/index.js", "--help"], { encoding: "utf8" })

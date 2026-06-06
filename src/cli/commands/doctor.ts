@@ -1,3 +1,7 @@
+import { copyFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+
 import type { Command } from "commander";
 
 import type { AgentsProjectionState } from "../../projections/index.js";
@@ -12,6 +16,14 @@ import {
   openCliRuntime,
   runtimeOptionsFromCommand
 } from "../runtime.js";
+
+type SqliteFileLabel = "main" | "wal" | "shm";
+
+export interface SqliteFileDiagnostic {
+  label: SqliteFileLabel;
+  path: string;
+  bytes?: number;
+}
 
 export function registerDoctorCommand(program: Command, env: CliExecutionEnvironment): void {
   program
@@ -49,20 +61,63 @@ export function registerDoctorCommand(program: Command, env: CliExecutionEnviron
         return;
       }
 
-      const runtime = openCliRuntime(runtimeOptions);
+      const storePath = diagnostics.store.path;
+
+      if (!storePath) {
+        env.io.write("events: unknown (store path missing)");
+        env.io.write("project initialized: unknown (store path missing)");
+        env.io.write("agents: unknown (store path missing)");
+        env.io.write("pending inbox: unknown (store path missing)");
+        return;
+      }
+
+      const sqliteDiagnostics = sqliteFileDiagnostics(storePath);
+      const snapshot = copySqliteStoreSnapshot(storePath, sqliteDiagnostics);
+      const runtime = openCliRuntime({
+        ...runtimeOptions,
+        storePath: snapshot.storePath
+      });
 
       try {
         const projections = runtime.projections();
+        const eventCount = runtime.eventStore.count(runtime.context.project.id);
+        const journalMode = String(runtime.store.db.pragma("journal_mode", { simple: true }));
 
-        env.io.write(`events: ${runtime.context.events().length}`);
+        env.io.write(`events: ${eventCount}`);
         env.io.write(`project initialized: ${projections.projectState.project ? "yes" : "no"}`);
         env.io.write(`agents: ${projections.agents.endpoints.length}`);
         env.io.write(`pending inbox: ${projections.brief.pendingInboxCount}`);
+        env.io.write(`sqlite journal_mode: ${journalMode}`);
+        writeSqliteFileDiagnostics(env, sqliteDiagnostics);
         writeClaudeMonitorSessionSummary(env, projections.agents);
       } finally {
         runtime.close();
+        snapshot.cleanup();
       }
     });
+}
+
+export function sqliteFileDiagnostics(storePath: string): SqliteFileDiagnostic[] {
+  return [
+    sqliteFileDiagnostic("main", storePath),
+    sqliteFileDiagnostic("wal", `${storePath}-wal`),
+    sqliteFileDiagnostic("shm", `${storePath}-shm`)
+  ];
+}
+
+export function sqliteWalWarning(diagnostics: SqliteFileDiagnostic[]): string | undefined {
+  const mainBytes = diagnostics.find((diagnostic) => diagnostic.label === "main")?.bytes;
+  const walBytes = diagnostics.find((diagnostic) => diagnostic.label === "wal")?.bytes;
+
+  if (mainBytes === undefined || walBytes === undefined || mainBytes === 0) {
+    return undefined;
+  }
+
+  if (walBytes > mainBytes * 2) {
+    return `sqlite wal warning: wal ${walBytes} bytes is more than twice main database ${mainBytes} bytes`;
+  }
+
+  return undefined;
 }
 
 function writeDiagnostic(
@@ -86,6 +141,47 @@ function colorForDiagnosticStatus(status: DiagnosticStatus): CliColor {
     case "error":
       return "red";
   }
+}
+
+function writeSqliteFileDiagnostics(
+  env: CliExecutionEnvironment,
+  diagnostics: SqliteFileDiagnostic[]
+): void {
+  for (const diagnostic of diagnostics) {
+    const size = diagnostic.bytes === undefined ? "missing" : `${diagnostic.bytes} bytes`;
+    env.io.write(`sqlite ${diagnostic.label}: ${size} ${diagnostic.path}`);
+  }
+
+  const warning = sqliteWalWarning(diagnostics);
+
+  if (warning) {
+    env.io.write(warning);
+  }
+}
+
+function copySqliteStoreSnapshot(
+  storePath: string,
+  diagnostics: SqliteFileDiagnostic[]
+): { storePath: string; cleanup(): void } {
+  const root = mkdtempSync(join(tmpdir(), "tachikoma-doctor-"));
+  const snapshotStorePath = join(root, basename(storePath));
+
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.bytes === undefined) {
+      continue;
+    }
+
+    const destination =
+      diagnostic.label === "main" ? snapshotStorePath : `${snapshotStorePath}-${diagnostic.label}`;
+    copyFileSync(diagnostic.path, destination);
+  }
+
+  return {
+    storePath: snapshotStorePath,
+    cleanup: () => {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
 }
 
 function writeClaudeMonitorTroubleshooting(env: CliExecutionEnvironment): void {
@@ -129,4 +225,27 @@ function writeClaudeMonitorSessionSummary(
         .join(", ")}`
     );
   }
+}
+
+function sqliteFileDiagnostic(label: SqliteFileLabel, path: string): SqliteFileDiagnostic {
+  try {
+    return {
+      label,
+      path,
+      bytes: statSync(path).size
+    };
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return {
+        label,
+        path
+      };
+    }
+
+    throw error;
+  }
+}
+
+function isNotFoundError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

@@ -333,14 +333,12 @@ export function registerTachikomaTools(server: McpServer, defaults: McpRuntimeDe
           replyPolicy: input.replyPolicy
         });
         const sent = events.find((event) => event.type === "message.sent");
-        const projected = runtime
-          .projections()
-          .conversations.messages.find((message) => message.id === sent?.target.messageId);
+        const recipients = Array.isArray(sent?.payload.recipients) ? sent.payload.recipients : [];
 
         return toolResponse({
           conversationId: input.conversationId,
           messageId: sent?.target.messageId,
-          recipients: projected?.recipients ?? []
+          recipients
         });
       })
   );

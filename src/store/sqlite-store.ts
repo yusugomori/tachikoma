@@ -29,9 +29,9 @@ export class SqliteStore {
         fileMustExist: options.readonly ?? false
       });
 
-      configureDatabase(this.db);
+      configureDatabase(this.db, { readonly: options.readonly ?? false });
 
-      if (options.migrate ?? true) {
+      if (options.migrate ?? !options.readonly) {
         applyMigrations(this.db);
       }
     } catch (error) {
@@ -54,8 +54,16 @@ export class SqliteStore {
   }
 }
 
-export function configureDatabase(db: DatabaseConnection): void {
+export function configureDatabase(
+  db: DatabaseConnection,
+  options: { readonly?: boolean } = {}
+): void {
   db.pragma("foreign_keys = ON");
+  if (options.readonly) {
+    db.pragma("query_only = ON");
+    return;
+  }
+
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
 }

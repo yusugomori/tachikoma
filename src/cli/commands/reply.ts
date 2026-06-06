@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 
+import type { RoutingTarget } from "../../domain/types.js";
 import { formatTargets } from "../io.js";
 import { type CliExecutionEnvironment, withCliRuntime } from "../runtime.js";
 
@@ -29,10 +30,9 @@ export function registerReplyCommand(program: Command, env: CliExecutionEnvironm
         });
         const sent = events.find((event) => event.type === "message.sent");
         const routed = events.find((event) => event.type === "conversation.message_routed");
-        const projected = runtime
-          .projections()
-          .conversations.messages.find((candidate) => candidate.id === sent?.target.messageId);
-        const recipients = projected?.recipients ?? [];
+        const recipients = Array.isArray(sent?.payload.recipients)
+          ? (sent.payload.recipients as RoutingTarget[])
+          : [];
 
         env.io.write(`conversation: ${threadId}`);
         env.io.write(`message: ${sent?.target.messageId}`);
