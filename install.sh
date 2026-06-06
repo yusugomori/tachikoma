@@ -15,7 +15,7 @@ By default this installs the prebuilt tarball from the latest GitHub release.
 Environment:
   TACHIKOMA_PACKAGE   override install source: npm package name, git spec,
                       or tarball path/URL (default: latest GitHub release tgz)
-  TACHIKOMA_VERSION   optional release tag to pin (e.g. v0.1.0). With the
+  TACHIKOMA_VERSION   optional release tag to pin (e.g. v0.2.0). With the
                       default source it selects that release's tarball; with a
                       TACHIKOMA_PACKAGE override it is the npm version or git ref.
 EOF

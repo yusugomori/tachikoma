@@ -17,7 +17,7 @@ export function createTachikomaMcpServer(options: TachikomaMcpServerOptions = {}
   const server = new McpServer(
     {
       name: options.name ?? "tachikoma",
-      version: options.version ?? "0.1.0"
+      version: options.version ?? "0.2.0"
     },
     {
       capabilities: {

@@ -621,7 +621,7 @@ export class CodexAppServerClient {
       clientInfo: {
         name: "tachikoma",
         title: "Tachikoma Codex remote-control probe",
-        version: "0.1.0"
+        version: "0.2.0"
       },
       capabilities: {
         experimentalApi: true,

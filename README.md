@@ -101,7 +101,7 @@ tachikoma status
 The installer downloads the prebuilt tarball from the latest GitHub release and
 runs `npm install -g` on it, so only `node` and `npm` are required (no build
 toolchain). Pin a specific release with `TACHIKOMA_VERSION` (e.g.
-`TACHIKOMA_VERSION=v0.1.0`), or point `TACHIKOMA_PACKAGE` at any npm name, git
+`TACHIKOMA_VERSION=v0.2.0`), or point `TACHIKOMA_PACKAGE` at any npm name, git
 spec, or tarball to override the source.
 
 `init` initializes project state and installs local agent integration:

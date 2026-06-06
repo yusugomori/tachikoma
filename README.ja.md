@@ -67,7 +67,7 @@ tachikoma init
 tachikoma status
 ```
 
-installer は最新の GitHub release から build 済み tarball を取得し、`npm install -g` します。そのため `node`・`npm` だけあればよく、build 環境は不要です。`TACHIKOMA_VERSION`（例: `TACHIKOMA_VERSION=v0.1.0`）で特定 release を固定でき、`TACHIKOMA_PACKAGE` に npm 名・git spec・tarball を渡せば install 元を上書きできます。
+installer は最新の GitHub release から build 済み tarball を取得し、`npm install -g` します。そのため `node`・`npm` だけあればよく、build 環境は不要です。`TACHIKOMA_VERSION`（例: `TACHIKOMA_VERSION=v0.2.0`）で特定 release を固定でき、`TACHIKOMA_PACKAGE` に npm 名・git spec・tarball を渡せば install 元を上書きできます。
 
 `init` は project state に加えて、local agent integration も入れます。`.tachikoma/project.toml`、`.tachikoma/agent-instructions.md`、managed `.gitignore` block、生成 skill、`.mcp.json`、Codex/Claude の host hook activation file が対象です。初期化後は Codex または Claude を再起動し、プロンプトが出たら **project を trust し hook を承認**してから（Codex では必須。「Codex の project trust と hook approval」を参照）`/mcp` を確認します。Codex CLI の session によっては repository-local な `.mcp.json` だけでは読み込まれないため、`/mcp` に `tachikoma` が出ない場合は下の `codex mcp add` で登録してから Codex を再起動します。
 

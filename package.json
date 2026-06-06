@@ -1,6 +1,6 @@
 {
   "name": "@yusugomori/tachikoma",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local project-state runtime for coding agents.",
   "license": "MIT",
   "author": "Yusuke Sugomori <me@yusugomori.com>",
