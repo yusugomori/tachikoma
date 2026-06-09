@@ -75,7 +75,7 @@ function buildProgram(
   program
     .name("tachikoma")
     .description("Local project-state runtime for coding agents.")
-    .version("0.2.0")
+    .version("0.2.1")
     .option("--cwd <path>", "Target repository cwd.")
     .option("--project <project_id>", "Project id.")
     .option("--project-name <name>", "Project display name.")

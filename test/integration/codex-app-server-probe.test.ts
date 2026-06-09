@@ -842,7 +842,7 @@ process.exit(0);
     expect(readCodexAppServerWorkers(cli.root)).toEqual([external]);
   });
 
-  it("delivers pending inbox through a mocked Codex app-server and records the reply", async () => {
+  it("wakes Codex with the directive and marks it handled without scraping a reply", async () => {
     const cli = createCliHarness(roots);
 
     await cli.run("--store", cli.storePath, "--project", "delivery-test", "init", "--store-only");
@@ -940,8 +940,7 @@ process.exit(0);
           client: new CodexAppServerClient(transport)
         })
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
+        agentName: "loki"
       });
       const deliveredAttempt = runtime
         .projections()
@@ -955,7 +954,8 @@ process.exit(0);
       });
       expect(deliveredAttempt).toMatchObject({
         deliveryMode: "realtime",
-        status: "delivered"
+        status: "delivered",
+        outcome: "forwarded"
       });
     } finally {
       runtime.close();
@@ -980,7 +980,8 @@ process.exit(0);
       "loki"
     );
 
-    expect(thread).toContain("PONG");
+    expect(thread).toContain("Reply exactly PONG");
+    expect(thread).not.toContain("loki ->");
     expect(inbox).toBe("inbox: loki (0)");
   });
 
@@ -1096,8 +1097,7 @@ process.exit(0);
           client: new CodexAppServerClient(transport)
         })
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
+        agentName: "loki"
       });
 
       const turnStart = transport.requests.find((request) => request.method === "turn/start");
@@ -1110,10 +1110,8 @@ process.exit(0);
       expect(turnStart?.params).toMatchObject({
         threadId: "thread_tui"
       });
-      expect(JSON.stringify(turnStart?.params)).toContain(
-        "records your assistant response back to Tachikoma automatically"
-      );
-      expect(JSON.stringify(turnStart?.params)).toContain("Do not call tachikoma_reply");
+      expect(JSON.stringify(turnStart?.params)).toContain("assigned work");
+      expect(JSON.stringify(turnStart?.params)).toContain("tachikoma_reply");
     } finally {
       runtime.close();
     }
@@ -1183,8 +1181,7 @@ process.exit(0);
           client: new CodexAppServerClient(transport)
         })
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
+        agentName: "loki"
       });
 
       expect(result).toMatchObject({
@@ -1330,8 +1327,7 @@ process.exit(0);
           client: new CodexAppServerClient(transport)
         })
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
+        agentName: "loki"
       });
 
       const turnStart = transport.requests.find((request) => request.method === "turn/start");
@@ -1350,14 +1346,14 @@ process.exit(0);
     }
   });
 
-  it("delivers a reply found by polling when completion notifications are missing", async () => {
+  it("defers Codex delivery while a turn is already in progress", async () => {
     const cli = createCliHarness(roots);
 
     await cli.run(
       "--store",
       cli.storePath,
       "--project",
-      "delivery-poll-test",
+      "delivery-busy-test",
       "init",
       "--store-only"
     );
@@ -1365,7 +1361,7 @@ process.exit(0);
       "--store",
       cli.storePath,
       "--project",
-      "delivery-poll-test",
+      "delivery-busy-test",
       "join",
       "loki",
       "--runtime",
@@ -1373,11 +1369,11 @@ process.exit(0);
       "--delivery-mode",
       "realtime"
     );
-    const ask = await cli.run(
+    await cli.run(
       "--store",
       cli.storePath,
       "--project",
-      "delivery-poll-test",
+      "delivery-busy-test",
       "--as",
       "musashi",
       "--actor-runtime",
@@ -1386,7 +1382,7 @@ process.exit(0);
       "loki",
       "Reply exactly PONG"
     );
-    const threadId = extract("conversation", ask);
+
     const transport = new RecordingTransport({
       initialize: {},
       "thread/read": [
@@ -1400,39 +1396,17 @@ process.exit(0);
             id: "thread_loki",
             turns: [
               {
-                id: "turn_1",
+                id: "turn_active",
                 status: "inProgress",
                 items: []
               }
             ]
           }
-        },
-        {
-          thread: {
-            id: "thread_loki",
-            turns: [
-              {
-                id: "turn_1",
-                status: "completed",
-                items: [
-                  {
-                    id: "item_1",
-                    type: "agentMessage",
-                    turnId: "turn_1",
-                    text: "PONG"
-                  }
-                ]
-              }
-            ]
-          }
         }
       ],
-      "thread/turns/items/list": {
-        data: []
-      },
       "turn/start": {
         turn: {
-          id: "turn_1",
+          id: "turn_should_not_start",
           status: "inProgress"
         }
       }
@@ -1450,7 +1424,7 @@ process.exit(0);
     const runtime = openCliRuntime({
       cwd: cli.root,
       storePath: cli.storePath,
-      projectId: "delivery-poll-test"
+      projectId: "delivery-busy-test"
     });
     try {
       const result = await new CodexDeliveryService(runtime.context, {
@@ -1458,174 +1432,33 @@ process.exit(0);
           client: new CodexAppServerClient(transport)
         })
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1
+        agentName: "loki"
       });
 
       expect(result).toMatchObject({
-        attempted: 1,
-        delivered: 1,
+        attempted: 0,
+        delivered: 0,
         failed: 0,
-        pending: 0
+        pending: 1
       });
+      expect(result.warnings.join("\n")).toContain("mid-turn");
+      expect(transport.requests.some((request) => request.method === "turn/start")).toBe(false);
     } finally {
       runtime.close();
     }
 
-    const thread = await cli.run(
+    const inbox = await cli.run(
       "--store",
       cli.storePath,
       "--project",
-      "delivery-poll-test",
-      "thread",
-      "show",
-      threadId
-    );
-
-    expect(thread).toContain("PONG");
-  });
-
-  it("records the current Codex turn reply instead of a stale assistant message", async () => {
-    const cli = createCliHarness(roots);
-
-    await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-stale-reply-test",
-      "init",
-      "--store-only"
-    );
-    await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-stale-reply-test",
-      "join",
-      "loki",
-      "--runtime",
-      "codex",
-      "--delivery-mode",
-      "realtime"
-    );
-    const ask = await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-stale-reply-test",
+      "delivery-busy-test",
+      "inbox",
       "--as",
-      "musashi",
-      "--actor-runtime",
-      "claude",
-      "ask",
-      "loki",
-      "Choose paper for this janken turn."
-    );
-    const threadId = extract("conversation", ask);
-    const transport = new RecordingTransport(
-      {
-        initialize: {},
-        "thread/read": [
-          {
-            thread: {
-              id: "thread_loki"
-            }
-          },
-          {
-            thread: {
-              id: "thread_loki",
-              turns: [
-                {
-                  id: "turn_old",
-                  status: "completed",
-                  items: [
-                    {
-                      id: "item_old",
-                      type: "agentMessage",
-                      turnId: "turn_old",
-                      text: "✊ グー"
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        ],
-        "thread/turns/items/list": {
-          data: [
-            {
-              id: "item_current",
-              type: "agentMessage",
-              text: "パー(✋)",
-              phase: "final"
-            }
-          ]
-        },
-        "turn/start": {
-          turn: {
-            id: "turn_current",
-            status: "inProgress"
-          }
-        }
-      },
-      {
-        method: "turn/completed",
-        params: {
-          threadId: "thread_loki",
-          turn: {
-            id: "turn_current",
-            status: "completed"
-          }
-        }
-      }
+      "loki"
     );
 
-    writeCodexAppServerWorker(cli.root, {
-      agentName: "loki",
-      cwd: cli.root,
-      serverUrl: "ws://127.0.0.1:48123",
-      startedByTachikoma: true,
-      codexThreadId: "thread_loki",
-      lifecycle: "daemon"
-    });
-
-    const runtime = openCliRuntime({
-      cwd: cli.root,
-      storePath: cli.storePath,
-      projectId: "delivery-stale-reply-test"
-    });
-    try {
-      const result = await new CodexDeliveryService(runtime.context, {
-        clientFactory: () => ({
-          client: new CodexAppServerClient(transport)
-        })
-      }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
-      });
-
-      expect(result).toMatchObject({
-        attempted: 1,
-        delivered: 1,
-        failed: 0,
-        pending: 0
-      });
-    } finally {
-      runtime.close();
-    }
-
-    const thread = await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-stale-reply-test",
-      "thread",
-      "show",
-      threadId
-    );
-
-    expect(thread).toContain("パー(✋)");
-    expect(thread).not.toContain("✊ グー");
+    expect(inbox).toContain("inbox: loki (1)");
+    expect(inbox).toContain("Reply exactly PONG");
   });
 
   it("acknowledges replyPolicy=none Codex deliveries without starting an app-server turn", async () => {
@@ -1679,8 +1512,7 @@ process.exit(0);
           throw new Error("replyPolicy=none should not open a Codex app-server client.");
         }
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
+        agentName: "loki"
       });
       const attempts = runtime.projections().inbox.deliveryAttempts;
       const inboxItem = runtime
@@ -1797,8 +1629,7 @@ process.exit(0);
           );
         }
       }).deliverPending({
-        agentName: "musashi",
-        waitForCompletionMs: 1000
+        agentName: "musashi"
       });
       const inboxItem = runtime
         .projections()
@@ -1831,135 +1662,6 @@ process.exit(0);
     expect(inbox).toContain("inbox: musashi (1)");
     expect(inbox).toContain("[delivered]");
     expect(inbox).toContain("Visible reply from loki.");
-  });
-
-  it("records a Codex reply to a system-originated ask without routing it to a fake agent", async () => {
-    const cli = createCliHarness(roots);
-
-    await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-system-test",
-      "init",
-      "--store-only"
-    );
-    await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-system-test",
-      "join",
-      "loki",
-      "--runtime",
-      "codex",
-      "--delivery-mode",
-      "realtime"
-    );
-    const ask = await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-system-test",
-      "ask",
-      "loki",
-      "Reply exactly PONG"
-    );
-    const threadId = extract("conversation", ask);
-    const transport = new RecordingTransport(
-      {
-        initialize: {},
-        "thread/read": [
-          {
-            thread: {
-              id: "thread_loki"
-            }
-          },
-          {
-            thread: {
-              id: "thread_loki",
-              turns: [
-                {
-                  id: "turn_1",
-                  status: "completed",
-                  items: [
-                    {
-                      id: "item_1",
-                      type: "agentMessage",
-                      turnId: "turn_1",
-                      text: "PONG"
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        ],
-        "turn/start": {
-          turn: {
-            id: "turn_1",
-            status: "inProgress"
-          }
-        }
-      },
-      {
-        method: "turn/completed",
-        params: {
-          threadId: "thread_loki",
-          turn: {
-            id: "turn_1",
-            status: "completed"
-          }
-        }
-      }
-    );
-
-    writeCodexAppServerWorker(cli.root, {
-      agentName: "loki",
-      cwd: cli.root,
-      serverUrl: "ws://127.0.0.1:48123",
-      startedByTachikoma: true,
-      codexThreadId: "thread_loki",
-      lifecycle: "daemon"
-    });
-
-    const runtime = openCliRuntime({
-      cwd: cli.root,
-      storePath: cli.storePath,
-      projectId: "delivery-system-test"
-    });
-    try {
-      const result = await new CodexDeliveryService(runtime.context, {
-        clientFactory: () => ({
-          client: new CodexAppServerClient(transport)
-        })
-      }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
-      });
-
-      expect(result).toMatchObject({
-        attempted: 1,
-        delivered: 1,
-        failed: 0,
-        pending: 0
-      });
-    } finally {
-      runtime.close();
-    }
-
-    const thread = await cli.run(
-      "--store",
-      cli.storePath,
-      "--project",
-      "delivery-system-test",
-      "thread",
-      "show",
-      threadId
-    );
-
-    expect(thread).toContain("system -> loki: Reply exactly PONG");
-    expect(thread).toContain("loki -> unrouted: PONG");
   });
 
   it("failed Codex app-server delivery leaves the message visible", async () => {
@@ -2019,8 +1721,7 @@ process.exit(0);
           throw new Error("app-server unavailable");
         }
       }).deliverPending({
-        agentName: "loki",
-        waitForCompletionMs: 1000
+        agentName: "loki"
       });
 
       expect(result).toMatchObject({
