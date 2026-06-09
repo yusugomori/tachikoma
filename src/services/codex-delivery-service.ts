@@ -1,11 +1,8 @@
-import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 
 import {
   CodexAppServerClient,
-  type CodexThreadMessage,
   type CodexThreadSummary,
-  latestAssistantMessage,
   WebSocketCodexAppServerTransport
 } from "../adapters/codex/app-server-client.js";
 import { isProcessAlive } from "../adapters/codex/app-server-process.js";
@@ -17,7 +14,6 @@ import {
 import type { EventEnvelope } from "../domain/events.js";
 import type { AgentEndpoint, DeliveryMode } from "../domain/types.js";
 import type { ServiceContext } from "./context.js";
-import { ConversationService } from "./conversation-service.js";
 import type { DeliveryDirective } from "./delivery-service.js";
 import { DeliveryService } from "./delivery-service.js";
 import { MessageService } from "./message-service.js";
@@ -26,7 +22,6 @@ import { parseCommandInput } from "./validation.js";
 const codexDeliverPendingInputSchema = z.object({
   agentName: z.string().min(1),
   maxItems: z.number().int().positive().default(5),
-  waitForCompletionMs: z.number().int().nonnegative().default(60000),
   requestTimeoutMs: z.number().int().positive().default(15000)
 });
 
@@ -59,22 +54,8 @@ interface DeliverOneInput {
   threadId: string;
   cwd: string;
   endpoint: AgentEndpoint;
-  sessionId: string;
   deliveryMode: DeliveryMode;
   directive: DeliveryDirective;
-  waitForCompletionMs: number;
-}
-
-interface WaitForAssistantReplyInput {
-  client: CodexAppServerClient;
-  threadId: string;
-  turnId: string;
-  timeoutMs: number;
-}
-
-interface WaitForAssistantReplyResult {
-  reply?: CodexThreadMessage;
-  warnings: string[];
 }
 
 export class CodexDeliveryService {
@@ -167,16 +148,23 @@ export class CodexDeliveryService {
         lifecycle: worker.lifecycle
       });
 
-      for (const directive of actionableDirectives) {
+      const deliveryThreadId = activeWorker.codexThreadId ?? deliveryThread.id;
+      const directive = actionableDirectives[0];
+
+      // Wake-only deliveries are no longer gated by a completion scrape, so we
+      // serialize them here: deliver at most one actionable directive per cycle,
+      // and never while Codex is mid-turn. Otherwise each pending item would fire
+      // its own turn/start on the same thread and stack competing "current task"
+      // turns. Remaining items stay pending and are delivered on a later cycle
+      // once Codex is idle again.
+      if (directive && !(await this.hasActiveTurn(handle.client, deliveryThreadId))) {
         const outcome = await this.deliverOne({
           client: handle.client,
-          threadId: activeWorker.codexThreadId ?? deliveryThread.id,
+          threadId: deliveryThreadId,
           cwd: deliveryThread.cwd ?? this.repoRoot(),
           endpoint: batch.endpoint,
-          sessionId: batch.session.id,
           deliveryMode: batch.deliveryMode,
-          directive,
-          waitForCompletionMs: parsed.waitForCompletionMs
+          directive
         });
 
         result.attempted += outcome.attempted;
@@ -192,6 +180,10 @@ export class CodexDeliveryService {
             lifecycle: activeWorker.lifecycle
           });
         }
+      } else if (directive) {
+        result.warnings.push(
+          `Codex ${worker.agentName} is mid-turn; deferring ${actionableDirectives.length} pending task(s) until it is idle.`
+        );
       }
     } catch (error) {
       await this.failAllInto(
@@ -324,40 +316,11 @@ export class CodexDeliveryService {
         return this.failOne(input, attemptId, events, "turn/start did not return a turn id.");
       }
 
-      const wait = await this.waitForAssistantReply({
-        client: input.client,
-        threadId: input.threadId,
-        turnId: turn.id,
-        timeoutMs: input.waitForCompletionMs
-      });
-      const reply = wait.reply;
-
-      if (!reply?.text) {
-        return this.failOne(
-          input,
-          attemptId,
-          events,
-          wait.warnings.at(-1) ??
-            "thread/read did not include an assistant reply for the delivered turn.",
-          wait.warnings
-        );
-      }
-
-      events.push(
-        ...new ConversationService(
-          this.context.withActor({
-            name: input.endpoint.name,
-            agentId: input.endpoint.id,
-            runtime: input.endpoint.runtime,
-            role: input.endpoint.role,
-            sessionId: input.sessionId
-          })
-        ).replyToThread({
-          conversationId: input.directive.conversationId,
-          body: reply.text,
-          linkedRecords: input.directive.linkedRecords
-        })
-      );
+      // Wake-only delivery: the directive is now the agent's active task. The
+      // started turn is intentionally NOT scraped — the agent records its own
+      // outcome by calling tachikoma_reply when the work is complete (which may
+      // be many turns later). Mark the inbox item handled so the delivery loop
+      // does not re-inject the same task while the agent is still working.
       events.push(
         this.messages.recordDeliveryDelivered({
           id: attemptId,
@@ -365,7 +328,10 @@ export class CodexDeliveryService {
           messageId: input.directive.messageId,
           recipient: input.directive.target,
           deliveryMode: input.deliveryMode,
-          outcome: "replied"
+          outcome: "forwarded"
+        }),
+        this.messages.markRead({
+          inboxItemId: input.directive.inboxItemId
         })
       );
 
@@ -420,103 +386,15 @@ export class CodexDeliveryService {
     };
   }
 
-  private async waitForAssistantReply(
-    input: WaitForAssistantReplyInput
-  ): Promise<WaitForAssistantReplyResult> {
-    if (input.timeoutMs <= 0) {
-      return {
-        reply: await this.readLatestAssistantReply(input.client, input.threadId, input.turnId),
-        warnings: []
-      };
-    }
-
-    const deadline = Date.now() + input.timeoutMs;
-    let notificationSettled = false;
-    let notificationWarning: string | undefined;
-    let readWarning: string | undefined;
-
-    void input.client
-      .waitForTurnCompleted({
-        threadId: input.threadId,
-        turnId: input.turnId,
-        timeoutMs: input.timeoutMs
-      })
-      .then(() => {
-        notificationSettled = true;
-      })
-      .catch((error: unknown) => {
-        notificationSettled = true;
-        notificationWarning = error instanceof Error ? error.message : String(error);
-      });
-
-    while (Date.now() <= deadline) {
-      try {
-        const reply = await this.readLatestAssistantReply(
-          input.client,
-          input.threadId,
-          input.turnId
-        );
-
-        if (reply?.text) {
-          return {
-            reply,
-            warnings: []
-          };
-        }
-      } catch (error) {
-        readWarning = error instanceof Error ? error.message : String(error);
-      }
-
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) {
-        break;
-      }
-
-      await sleep(Math.min(notificationSettled && !notificationWarning ? 250 : 1000, remainingMs));
-    }
-
+  private async hasActiveTurn(client: CodexAppServerClient, threadId: string): Promise<boolean> {
     try {
-      const reply = await this.readLatestAssistantReply(input.client, input.threadId, input.turnId);
-
-      if (reply?.text) {
-        return {
-          reply,
-          warnings: []
-        };
-      }
-    } catch (error) {
-      readWarning = error instanceof Error ? error.message : String(error);
+      const thread = await client.readThreadNormalized(threadId);
+      return thread.turns.some((turn) => isActiveTurnStatus(turn.status));
+    } catch {
+      // If the thread cannot be read we cannot prove Codex is busy; let the
+      // single delivery attempt proceed and surface any real error itself.
+      return false;
     }
-
-    return {
-      warnings: uniqueStrings(
-        [
-          notificationWarning,
-          readWarning,
-          "thread/read did not include an assistant reply for the delivered turn."
-        ].filter((warning): warning is string => Boolean(warning))
-      )
-    };
-  }
-
-  private async readLatestAssistantReply(
-    client: CodexAppServerClient,
-    threadId: string,
-    turnId: string
-  ): Promise<CodexThreadMessage | undefined> {
-    const thread = await client.readThreadNormalized(threadId);
-    const reply = latestAssistantMessage(thread, turnId);
-
-    if (reply?.text) {
-      return reply;
-    }
-
-    const turnItems = await client.listTurnItemsNormalized({
-      threadId,
-      turnId
-    });
-
-    return latestAssistantMessage(turnItems, turnId);
   }
 
   private failAll(
@@ -631,29 +509,47 @@ function initialResult(
   };
 }
 
+const ACTIVE_TURN_STATUSES = new Set([
+  "inprogress",
+  "in_progress",
+  "running",
+  "pending",
+  "queued",
+  "started",
+  "active",
+  "working"
+]);
+
+function isActiveTurnStatus(status: string | undefined): boolean {
+  return status !== undefined && ACTIVE_TURN_STATUSES.has(status.toLowerCase());
+}
+
 function formatDirectivePrompt(directive: DeliveryDirective, agentName: string): string {
   const linkedRecords =
     directive.linkedRecords.length > 0
       ? directive.linkedRecords.map((record) => `${record.kind}:${record.id}`).join(", ")
       : "none";
 
+  const conversationId = directive.conversationId ?? "unknown";
+
   return [
     `Tachikoma delivery for ${agentName}.`,
-    `Thread: ${directive.conversationId ?? "unknown"}`,
+    `Thread: ${conversationId}`,
     `Message: ${directive.messageId ?? "unknown"}`,
     `Inbox item: ${directive.inboxItemId}`,
     `Reason: ${directive.reason}`,
     `Reply policy: ${directive.replyPolicy}`,
     `Linked records: ${linkedRecords}`,
     "",
-    "This Codex app-server delivery records your assistant response back to Tachikoma automatically. Do not call tachikoma_reply or `tachikoma reply` from this turn.",
+    "This is assigned work delivered through Tachikoma. Treat it as your current task and start now; take as many turns as you need to finish it.",
     "",
     "Request:",
     directive.body ?? "(no body)",
     "",
     directive.replyPolicy === "required"
-      ? "Reply with only the message that should be recorded back to the Tachikoma thread."
-      : "Reply only when there is substantive information to record back to the Tachikoma thread."
+      ? `When the work is complete, report the result back to this Tachikoma thread by calling the \`tachikoma_reply\` tool (or \`tachikoma reply ${conversationId} "<message>"\` if MCP is unavailable) with conversationId "${conversationId}". A completion report is required.`
+      : `If there is substantive information to record, report it back to this Tachikoma thread by calling the \`tachikoma_reply\` tool (or \`tachikoma reply ${conversationId} "<message>"\` if MCP is unavailable) with conversationId "${conversationId}".`,
+    "This delivery only starts your turn; it is not captured automatically. Your completion is recorded back to Tachikoma only when you call tachikoma_reply."
   ].join("\n");
 }
 

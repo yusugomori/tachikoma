@@ -62,7 +62,6 @@ interface CodexDeliverOptions {
   watch?: boolean;
   pollMs?: string;
   maxItems?: string;
-  waitMs?: string;
   requestTimeoutMs?: string;
 }
 
@@ -126,7 +125,6 @@ export function registerCodexCommand(program: Command, env: CliExecutionEnvironm
     .option("--watch", "Poll for pending messages until interrupted.")
     .option("--poll-ms <ms>", "Delivery loop poll interval.", "1000")
     .option("--max-items <count>", "Maximum messages to deliver per batch.", "5")
-    .option("--wait-ms <ms>", "Wait for Codex turn completion.", "60000")
     .option("--request-timeout-ms <ms>", "Codex app-server JSON-RPC request timeout.", "15000")
     .action(async function (this: Command) {
       await withCliRuntime(this, env, async (runtime) => {
@@ -368,11 +366,6 @@ async function runStartedCodexRuntime(
     agentName,
     pollMs: parseOptionalPositiveInteger(options.pollMs, "--poll-ms") ?? 1000,
     maxItems: 5,
-    waitForCompletionMs:
-      parseOptionalNonNegativeInteger(
-        process.env.TACHIKOMA_CODEX_DELIVERY_WAIT_MS,
-        "TACHIKOMA_CODEX_DELIVERY_WAIT_MS"
-      ) ?? 60000,
     requestTimeoutMs: 15000
   };
 
@@ -530,7 +523,6 @@ async function runCodexDeliveryCommand(
     agentName,
     pollMs: parseOptionalPositiveInteger(options.pollMs, "--poll-ms") ?? 1000,
     maxItems: parseOptionalPositiveInteger(options.maxItems, "--max-items") ?? 5,
-    waitForCompletionMs: parseOptionalNonNegativeInteger(options.waitMs, "--wait-ms") ?? 60000,
     requestTimeoutMs:
       parseOptionalPositiveInteger(options.requestTimeoutMs, "--request-timeout-ms") ?? 15000
   };
@@ -545,7 +537,6 @@ async function runCodexDeliveryCommand(
     await runtime.services.codexDelivery.deliverPending({
       agentName: deliveryOptions.agentName,
       maxItems: deliveryOptions.maxItems,
-      waitForCompletionMs: deliveryOptions.waitForCompletionMs,
       requestTimeoutMs: deliveryOptions.requestTimeoutMs
     })
   );
@@ -558,7 +549,6 @@ async function runCodexDeliveryLoop(
     agentName: string;
     pollMs: number;
     maxItems: number;
-    waitForCompletionMs: number;
     requestTimeoutMs: number;
     signal?: AbortSignal;
     reportResults?: boolean;
@@ -575,7 +565,6 @@ async function runCodexDeliveryLoop(
       const result = await runtime.services.codexDelivery.deliverPending({
         agentName: options.agentName,
         maxItems: options.maxItems,
-        waitForCompletionMs: options.waitForCompletionMs,
         requestTimeoutMs: options.requestTimeoutMs
       });
 
@@ -1100,23 +1089,6 @@ function parseOptionalPositiveInteger(
 
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed.toString() !== value) {
     throw new Error(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
-}
-
-function parseOptionalNonNegativeInteger(
-  value: string | undefined,
-  label: string
-): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed.toString() !== value) {
-    throw new Error(`${label} must be a non-negative integer.`);
   }
 
   return parsed;
